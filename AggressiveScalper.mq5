@@ -1,24 +1,24 @@
 //+------------------------------------------------------------------+
-//|                                         Aggressive_Scalper_V2.mq5 |
+//|                                     Aggressive_Scalper_English.mq5|
 //|                                  Copyright 2024, Google Deepmind |
 //|                                             https://www.mql5.com |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024, Google Deepmind"
 #property link      "https://www.mql5.com"
-#property version   "2.00"
+#property version   "2.10" // Updated to English Version
 #property strict
 
 #include <Trade\Trade.mqh>
 
 //--- Input parameters
-input double   FixedLot          = 0.5;      // Khoi luong lenh (Lot)
-input int      StopLossPoints    = 300;      // Cat lo (Points)
-input int      TakeProfitPoints  = 150;      // Chot loi (Points)
-input int      MaxPositions      = 3;        // So lenh toi da cung luc
-input int      TrailingStart     = 50;       // Bat dau doi SL khi lai (Points)
-input int      TrailingStep      = 20;       // Buoc nhay doi SL (Points)
-input int      MaxSpreadPoints   = 100;      // GIOI HAN SPREAD (Da tang len 100)
-input int      MagicNumber       = 123456;   // Ma dinh danh Bot
+input double   FixedLot          = 0.5;      // Fixed Lot Size per Trade
+input int      StopLossPoints    = 300;      // Stop Loss (in Points)
+input int      TakeProfitPoints  = 150;      // Take Profit (in Points)
+input int      MaxPositions      = 3;        // Max Concurrent Positions
+input int      TrailingStart     = 50;       // Trailing Start (Points) - Distance to start moving SL
+input int      TrailingStep      = 20;       // Trailing Step (Points) - Update frequency
+input int      MaxSpreadPoints   = 100;      // Max Allowed Spread (Points)
+input int      MagicNumber       = 123456;   // Expert Advisor ID (Magic Number)
 
 //--- Global variables
 CTrade         trade;
@@ -30,15 +30,17 @@ datetime       lastTradeCandleTime = 0;
 //+------------------------------------------------------------------+
 int OnInit()
   {
+   // Configure Trade Object
    trade.SetExpertMagicNumber(MagicNumber);
    trade.SetTypeFilling(ORDER_FILLING_IOC);
-   trade.SetDeviationInPoints(10);
+   trade.SetDeviationInPoints(10); // Max slippage allowed
 
-   // Cai dat Stochastic (5,3,3) - Fast Scalping
+   // Initialize Stochastic Oscillator (5,3,3) - Settings for Fast Scalping
    stochHandle = iStochastic(_Symbol, PERIOD_M1, 5, 3, 3, MODE_SMA, STO_LOWHIGH);
+   
    if(stochHandle == INVALID_HANDLE)
      {
-      Print("Loi: Khong tao duoc chi bao Stochastic");
+      Print("Error: Failed to create Stochastic indicator handle");
       return(INIT_FAILED);
      }
 
@@ -51,7 +53,7 @@ int OnInit()
 void OnDeinit(const int reason)
   {
    IndicatorRelease(stochHandle);
-   Comment(""); // Xoa man hinh hien thi khi tat bot
+   Comment(""); // Clear the dashboard when removing the EA
   }
 
 //+------------------------------------------------------------------+
@@ -59,64 +61,64 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTick()
   {
-   // --- 1. CAP NHAT DASHBOARD & DATA ---
+   // --- 1. DASHBOARD & DATA UPDATE ---
    int spread = (int)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
    
-   // Lay du lieu Stochastic de hien thi
+   // Retrieve Stochastic Data
    double main[], signal[];
    ArraySetAsSeries(main, true);
    ArraySetAsSeries(signal, true);
    
    if(CopyBuffer(stochHandle, 0, 0, 2, main) < 2 || CopyBuffer(stochHandle, 1, 0, 2, signal) < 2) return;
 
-   double main0 = main[0];   // Stoch Hien tai
+   double main0 = main[0];   // Current Stoch Main
    double signal0 = signal[0];
-   double main1 = main[1];   // Stoch Nen truoc
+   double main1 = main[1];   // Previous Stoch Main
    double signal1 = signal[1];
 
-   // VE MAN HINH THEO DOI (Goc trai tren)
+   // DRAW DASHBOARD (Top-Left Corner)
    string text = "=== AGGRESSIVE SCALPER DASHBOARD ===\n";
-   text += "Tai khoan: STANDARD | Balance: $" + DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2) + "\n";
+   text += "Account: STANDARD | Balance: $" + DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2) + "\n";
    text += "--------------------------------------\n";
-   text += "Spread hien tai: " + IntegerToString(spread) + " (Max: " + IntegerToString(MaxSpreadPoints) + ")\n";
+   text += "Current Spread: " + IntegerToString(spread) + " (Max: " + IntegerToString(MaxSpreadPoints) + ")\n";
    
-   if(spread > MaxSpreadPoints) text += "TRANG THAI: [TAM DUNG] Spread qua cao!\n";
-   else text += "TRANG THAI: [SAN SANG BAN]\n";
+   if(spread > MaxSpreadPoints) text += "STATUS: [PAUSED] Spread too high!\n";
+   else text += "STATUS: [READY TO TRADE]\n";
    
    text += "--------------------------------------\n";
    text += "Stoch Main: " + DoubleToString(main0, 2) + "\n";
    text += "Stoch Signal: " + DoubleToString(signal0, 2) + "\n";
    
-   // Hien thi tin hieu Mua/Ban tiem nang
-   if (main0 < 20) text += "VUNG: Qua Ban (Cho MUA...)\n";
-   else if (main0 > 80) text += "VUNG: Qua Mua (Cho BAN...)\n";
-   else text += "VUNG: Giua (Cho doi)\n";
+   // Display Potential Signals zones
+   if (main0 < 20) text += "ZONE: OVERSOLD (Waiting for BUY...)\n";
+   else if (main0 > 80) text += "ZONE: OVERBOUGHT (Waiting for SELL...)\n";
+   else text += "ZONE: Neutral (Waiting)\n";
 
-   Comment(text); // In ra man hinh
+   Comment(text); // Print dashboard to chart
 
-   // --- 2. KIEM TRA DIEU KIEN VAO LENH ---
+   // --- 2. ENTRY CONDITIONS ---
    
-   // Neu Spread cao qua thi khong vao lenh
+   // Spread Filter
    if(spread > MaxSpreadPoints) return;
 
-   // Quan ly Trailing Stop (Doi SL)
+   // Manage Trailing Stop
    ManageTrailingStop();
 
-   // Neu da du so lenh toi da thi thoi
+   // Max Positions Check
    if(PositionsTotal() >= MaxPositions) return;
 
-   // Moi nen M1 chi vao 1 lenh (Chong spam)
+   // One Trade Per Candle Rule (Anti-Spam)
    datetime currentCandleTime = iTime(_Symbol, PERIOD_M1, 0);
    if(currentCandleTime == lastTradeCandleTime) return;
 
-   // --- 3. LOGIC GIAO DICH ---
-   // MUA: Cat len o vung duoi 20
+   // --- 3. TRADING LOGIC ---
+   // BUY SIGNAL: Cross UP in Oversold zone (< 20)
    bool buySignal = (main1 < signal1) && (main0 > signal0) && (main0 < 20);
    
-   // BAN: Cat xuong o vung tren 80
+   // SELL SIGNAL: Cross DOWN in Overbought zone (> 80)
    bool sellSignal = (main1 > signal1) && (main0 < signal0) && (main0 > 80);
 
-   // --- 4. THUC THI LENH ---
+   // --- 4. EXECUTION ---
    if(buySignal)
      {
       double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
@@ -125,8 +127,8 @@ void OnTick()
       
       if(trade.Buy(FixedLot, _Symbol, ask, sl, tp, "Aggressive Buy"))
         {
-         lastTradeCandleTime = currentCandleTime; // Danh dau nen nay da trade
-         Print("DA MUA! Ticket: ", trade.ResultOrder());
+         lastTradeCandleTime = currentCandleTime; // Mark this candle as traded
+         Print("BUY ORDER OPENED! Ticket: ", trade.ResultOrder());
         }
      }
    else if(sellSignal)
@@ -137,14 +139,14 @@ void OnTick()
 
       if(trade.Sell(FixedLot, _Symbol, bid, sl, tp, "Aggressive Sell"))
         {
-         lastTradeCandleTime = currentCandleTime; // Danh dau nen nay da trade
-         Print("DA BAN! Ticket: ", trade.ResultOrder());
+         lastTradeCandleTime = currentCandleTime; // Mark this candle as traded
+         Print("SELL ORDER OPENED! Ticket: ", trade.ResultOrder());
         }
      }
   }
 
 //+------------------------------------------------------------------+
-//| Helper: Quan ly Trailing Stop (Doi SL)                           |
+//| Helper: Manage Trailing Stop                                     |
 //+------------------------------------------------------------------+
 void ManageTrailingStop()
   {
@@ -153,6 +155,7 @@ void ManageTrailingStop()
       ulong ticket = PositionGetTicket(i);
       if(ticket <= 0) continue;
 
+      // Filter: Only modify positions opened by this specific EA
       if(PositionGetString(POSITION_SYMBOL) != _Symbol || PositionGetInteger(POSITION_MAGIC) != MagicNumber)
          continue;
 
@@ -167,15 +170,15 @@ void ManageTrailingStop()
         {
          double profitPoints = (currentPrice - openPrice) / point;
          
-         // Neu lai > 50 point -> Doi SL ve Hoa Von (Open Price)
+         // Logic: Move SL to Break Even if profit > TrailingStart
          if(profitPoints >= TrailingStart)
            {
-            // Neu SL chua dời hoặc thấp hơn giá vào lệnh
+            // First step: Move SL to Open Price (Break Even)
             if(currentSL < openPrice)
               {
                trade.PositionModify(ticket, openPrice, currentTP);
               }
-            // Neu da Hoa Von, tiep tuc dời SL duoi chan gia (Trailing)
+            // Second step: Trail the price
             else if(currentSL >= openPrice)
               {
                double proposedSL = currentPrice - TrailingStart * point;
@@ -192,12 +195,12 @@ void ManageTrailingStop()
          
          if(profitPoints >= TrailingStart)
            {
-            // Doi SL ve Hoa Von
+            // Move SL to Break Even
             if(currentSL > openPrice && currentSL != 0)
               {
                trade.PositionModify(ticket, openPrice, currentTP);
               }
-            // Trailing
+            // Trail the price
             else if(currentSL <= openPrice && currentSL != 0)
               {
                double proposedSL = currentPrice + TrailingStart * point;
