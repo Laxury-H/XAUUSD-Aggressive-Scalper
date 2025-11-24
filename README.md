@@ -15,7 +15,7 @@ MQL5 Expert Advisor for scalping XAUUSD on the M1 timeframe. It trades fast Stoc
 - `MaxPositions` (3): Maximum open positions (all symbols).
 - `TrailingStart` (50): Profit in points to move stop to breakeven.
 - `TrailingStep` (20): Additional gain in points required to advance the trailing stop again.
-- `MaxSpreadPoints` (40): Maximum allowed spread to permit entries.
+- `MaxSpreadPoints` (100): Maximum allowed spread to permit entries.
 - `MagicNumber` (123456): EA magic number for identification.
 
 ## File
