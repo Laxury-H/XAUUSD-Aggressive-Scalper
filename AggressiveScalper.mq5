@@ -1,24 +1,24 @@
 //+------------------------------------------------------------------+
-//|                                             AggressiveScalper.mq5 |
+//|                                         Aggressive_Scalper_V2.mq5 |
 //|                                  Copyright 2024, Google Deepmind |
 //|                                             https://www.mql5.com |
 //+------------------------------------------------------------------+
 #property copyright "Copyright 2024, Google Deepmind"
 #property link      "https://www.mql5.com"
-#property version   "1.00"
+#property version   "2.00"
 #property strict
 
 #include <Trade\Trade.mqh>
 
 //--- Input parameters
-input double   FixedLot          = 0.5;      // Fixed Lot Size
-input int      StopLossPoints    = 300;      // Stop Loss in Points
-input int      TakeProfitPoints  = 150;      // Take Profit in Points
-input int      MaxPositions      = 3;        // Max Concurrent Positions
-input int      TrailingStart     = 50;       // Trailing Start (Points)
-input int      TrailingStep      = 20;       // Trailing Step (Points)
-input int      MaxSpreadPoints   = 40;       // Max Allowed Spread (Points)
-input int      MagicNumber       = 123456;   // Magic Number
+input double   FixedLot          = 0.5;      // Khoi luong lenh (Lot)
+input int      StopLossPoints    = 300;      // Cat lo (Points)
+input int      TakeProfitPoints  = 150;      // Chot loi (Points)
+input int      MaxPositions      = 3;        // So lenh toi da cung luc
+input int      TrailingStart     = 50;       // Bat dau doi SL khi lai (Points)
+input int      TrailingStep      = 20;       // Buoc nhay doi SL (Points)
+input int      MaxSpreadPoints   = 100;      // GIOI HAN SPREAD (Da tang len 100)
+input int      MagicNumber       = 123456;   // Ma dinh danh Bot
 
 //--- Global variables
 CTrade         trade;
@@ -30,87 +30,93 @@ datetime       lastTradeCandleTime = 0;
 //+------------------------------------------------------------------+
 int OnInit()
   {
-//--- Initialize Trade Class
    trade.SetExpertMagicNumber(MagicNumber);
-   trade.SetTypeFilling(ORDER_FILLING_IOC); // Or ORDER_FILLING_FOK depending on broker
-   trade.SetDeviationInPoints(10); // Slippage
+   trade.SetTypeFilling(ORDER_FILLING_IOC);
+   trade.SetDeviationInPoints(10);
 
-//--- Initialize Stochastic Indicator
+   // Cai dat Stochastic (5,3,3) - Fast Scalping
    stochHandle = iStochastic(_Symbol, PERIOD_M1, 5, 3, 3, MODE_SMA, STO_LOWHIGH);
    if(stochHandle == INVALID_HANDLE)
      {
-      Print("Failed to create Stochastic handle");
+      Print("Loi: Khong tao duoc chi bao Stochastic");
       return(INIT_FAILED);
      }
 
-//--- Print Contract Details
-   double contractSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_CONTRACT_SIZE);
-   double minVolume = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-   Print("=== EA Initialized ===");
-   Print("Symbol: ", _Symbol);
-   Print("Contract Size: ", contractSize);
-   Print("Min Volume: ", minVolume);
-   Print("Max Spread Allowed: ", MaxSpreadPoints);
-
    return(INIT_SUCCEEDED);
   }
+
 //+------------------------------------------------------------------+
 //| Expert deinitialization function                                 |
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
   {
    IndicatorRelease(stochHandle);
+   Comment(""); // Xoa man hinh hien thi khi tat bot
   }
+
 //+------------------------------------------------------------------+
 //| Expert tick function                                             |
 //+------------------------------------------------------------------+
 void OnTick()
   {
-//--- 1. Check Spread
+   // --- 1. CAP NHAT DASHBOARD & DATA ---
    int spread = (int)SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
-   if(spread > MaxSpreadPoints)
-      return;
-
-//--- 2. Manage Trailing Stop
-   ManageTrailingStop();
-
-//--- 3. Check Max Positions
-   if(PositionsTotal() >= MaxPositions)
-      return;
-
-//--- 4. Check One Trade Per Candle
-   datetime currentCandleTime = iTime(_Symbol, PERIOD_M1, 0);
-   if(currentCandleTime == lastTradeCandleTime)
-      return;
-
-//--- 5. Get Indicator Values
+   
+   // Lay du lieu Stochastic de hien thi
    double main[], signal[];
    ArraySetAsSeries(main, true);
    ArraySetAsSeries(signal, true);
+   
+   if(CopyBuffer(stochHandle, 0, 0, 2, main) < 2 || CopyBuffer(stochHandle, 1, 0, 2, signal) < 2) return;
 
-   if(CopyBuffer(stochHandle, 0, 0, 2, main) < 2 || CopyBuffer(stochHandle, 1, 0, 2, signal) < 2)
-      return;
-
-   // Index 0 is current tick, Index 1 is previous closed candle (approx, actually just previous bar in array)
-   // Wait, CopyBuffer with start 0 gets current forming bar at index 0.
-   // We want to detect crossover on the current tick compared to "previous state".
-   // "Previous state" could be the previous tick, but MQL5 doesn't store previous tick indicator values easily without custom arrays.
-   // However, the user asked for "On Tick" execution.
-   // Standard approach: Compare Index 0 (Current) vs Index 1 (Previous Bar).
-   // If Cross happened *within* the current bar, Index 0 will show the new state, but Index 1 will show the old state (from closed bar).
-   // This confirms a cross occurred sometime between Close[1] and Current Tick.
-   // This is robust enough for "On Tick" trading without tick-by-tick array management.
-
-   double main0 = main[0];
+   double main0 = main[0];   // Stoch Hien tai
    double signal0 = signal[0];
-   double main1 = main[1];
+   double main1 = main[1];   // Stoch Nen truoc
    double signal1 = signal[1];
 
-//--- 6. Signal Logic
+   // VE MAN HINH THEO DOI (Goc trai tren)
+   string text = "=== AGGRESSIVE SCALPER DASHBOARD ===\n";
+   text += "Tai khoan: STANDARD | Balance: $" + DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2) + "\n";
+   text += "--------------------------------------\n";
+   text += "Spread hien tai: " + IntegerToString(spread) + " (Max: " + IntegerToString(MaxSpreadPoints) + ")\n";
+   
+   if(spread > MaxSpreadPoints) text += "TRANG THAI: [TAM DUNG] Spread qua cao!\n";
+   else text += "TRANG THAI: [SAN SANG BAN]\n";
+   
+   text += "--------------------------------------\n";
+   text += "Stoch Main: " + DoubleToString(main0, 2) + "\n";
+   text += "Stoch Signal: " + DoubleToString(signal0, 2) + "\n";
+   
+   // Hien thi tin hieu Mua/Ban tiem nang
+   if (main0 < 20) text += "VUNG: Qua Ban (Cho MUA...)\n";
+   else if (main0 > 80) text += "VUNG: Qua Mua (Cho BAN...)\n";
+   else text += "VUNG: Giua (Cho doi)\n";
+
+   Comment(text); // In ra man hinh
+
+   // --- 2. KIEM TRA DIEU KIEN VAO LENH ---
+   
+   // Neu Spread cao qua thi khong vao lenh
+   if(spread > MaxSpreadPoints) return;
+
+   // Quan ly Trailing Stop (Doi SL)
+   ManageTrailingStop();
+
+   // Neu da du so lenh toi da thi thoi
+   if(PositionsTotal() >= MaxPositions) return;
+
+   // Moi nen M1 chi vao 1 lenh (Chong spam)
+   datetime currentCandleTime = iTime(_Symbol, PERIOD_M1, 0);
+   if(currentCandleTime == lastTradeCandleTime) return;
+
+   // --- 3. LOGIC GIAO DICH ---
+   // MUA: Cat len o vung duoi 20
    bool buySignal = (main1 < signal1) && (main0 > signal0) && (main0 < 20);
+   
+   // BAN: Cat xuong o vung tren 80
    bool sellSignal = (main1 > signal1) && (main0 < signal0) && (main0 > 80);
 
-//--- 7. Execute Trade
+   // --- 4. THUC THI LENH ---
    if(buySignal)
      {
       double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
@@ -119,8 +125,8 @@ void OnTick()
       
       if(trade.Buy(FixedLot, _Symbol, ask, sl, tp, "Aggressive Buy"))
         {
-         lastTradeCandleTime = currentCandleTime;
-         Print("Buy Order Opened. Ticket: ", trade.ResultOrder());
+         lastTradeCandleTime = currentCandleTime; // Danh dau nen nay da trade
+         Print("DA MUA! Ticket: ", trade.ResultOrder());
         }
      }
    else if(sellSignal)
@@ -131,13 +137,14 @@ void OnTick()
 
       if(trade.Sell(FixedLot, _Symbol, bid, sl, tp, "Aggressive Sell"))
         {
-         lastTradeCandleTime = currentCandleTime;
-         Print("Sell Order Opened. Ticket: ", trade.ResultOrder());
+         lastTradeCandleTime = currentCandleTime; // Danh dau nen nay da trade
+         Print("DA BAN! Ticket: ", trade.ResultOrder());
         }
      }
   }
+
 //+------------------------------------------------------------------+
-//| Helper: Manage Trailing Stop                                     |
+//| Helper: Quan ly Trailing Stop (Doi SL)                           |
 //+------------------------------------------------------------------+
 void ManageTrailingStop()
   {
@@ -151,7 +158,7 @@ void ManageTrailingStop()
 
       double openPrice = PositionGetDouble(POSITION_PRICE_OPEN);
       double currentSL = PositionGetDouble(POSITION_SL);
-      double currentTP = PositionGetDouble(POSITION_TP); // Not used for trailing but good to know
+      double currentTP = PositionGetDouble(POSITION_TP);
       long type = PositionGetInteger(POSITION_TYPE);
       double currentPrice = (type == POSITION_TYPE_BUY) ? SymbolInfoDouble(_Symbol, SYMBOL_BID) : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
       double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
@@ -160,35 +167,18 @@ void ManageTrailingStop()
         {
          double profitPoints = (currentPrice - openPrice) / point;
          
-         // Move to BE
+         // Neu lai > 50 point -> Doi SL ve Hoa Von (Open Price)
          if(profitPoints >= TrailingStart)
            {
-            double newSL = openPrice + TrailingStep * point; // Actually, user said "Move SL to Break Even" first.
-            // Let's interpret: If profit > 50, SL = OpenPrice.
-            // Then if profit increases, trail.
-            
-            // Standard Trailing Logic:
-            // If Price > Open + TrailingStart, NewSL = Price - TrailingStart?
-            // User said: "If profit > 50 points, move SL to Break Even."
-            // "Trailing Step: 20 points."
-            
-            // Implementation:
-            // 1. Break Even Trigger:
-            if(currentSL < openPrice && profitPoints >= TrailingStart)
+            // Neu SL chua dời hoặc thấp hơn giá vào lệnh
+            if(currentSL < openPrice)
               {
                trade.PositionModify(ticket, openPrice, currentTP);
-               continue;
               }
-            
-            // 2. Trailing Step (Once at BE or better)
-            if(currentSL >= openPrice)
+            // Neu da Hoa Von, tiep tuc dời SL duoi chan gia (Trailing)
+            else if(currentSL >= openPrice)
               {
-               double proposedSL = currentPrice - TrailingStart * point; // Keep distance
-               // But user said "Trailing Step: 20 points". Usually means update only if change > 20 points.
-               // Or does it mean "Trail by keeping 20 points distance"?
-               // "Trailing Step" usually means "Update frequency/granularity".
-               // Let's assume: Keep SL at (CurrentPrice - TrailingStart). Update if (ProposedSL - CurrentSL) > TrailingStep.
-               
+               double proposedSL = currentPrice - TrailingStart * point;
                if(proposedSL > currentSL + TrailingStep * point)
                  {
                   trade.PositionModify(ticket, proposedSL, currentTP);
@@ -200,20 +190,17 @@ void ManageTrailingStop()
         {
          double profitPoints = (openPrice - currentPrice) / point;
          
-         // Move to BE
          if(profitPoints >= TrailingStart)
            {
-            if(currentSL > openPrice && currentSL != 0) // SL is above Open (loss side) or not set
+            // Doi SL ve Hoa Von
+            if(currentSL > openPrice && currentSL != 0)
               {
                trade.PositionModify(ticket, openPrice, currentTP);
-               continue;
               }
-              
             // Trailing
-            if(currentSL <= openPrice && currentSL != 0)
+            else if(currentSL <= openPrice && currentSL != 0)
               {
                double proposedSL = currentPrice + TrailingStart * point;
-               
                if(currentSL == 0 || proposedSL < currentSL - TrailingStep * point)
                  {
                   trade.PositionModify(ticket, proposedSL, currentTP);
@@ -223,4 +210,3 @@ void ManageTrailingStop()
         }
      }
   }
-//+------------------------------------------------------------------+
